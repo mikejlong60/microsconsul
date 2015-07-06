@@ -4,7 +4,6 @@ import java.util.{Timer, TimerTask}
 
 import com.orbitz.consul.AgentClient
 
-import scala.annotation.tailrec
 import scala.concurrent.duration.FiniteDuration
 
 trait ConsulCheck
@@ -29,16 +28,19 @@ trait IConsulService {
   def pass()
 }
 
+
 trait OrbitzConsulService extends IConsulService {
 
   val agent: AgentClient
   val description: ServiceDescription
+  lazy val checkId =  description.id
 
   def register(): Unit = registerCheck(description.check)
 
 
   private def registerCheck(check: ConsulCheck): Unit = {
     check match {
+
       case TTLCheck(d) => agent.register(description.port, d.toSeconds, description.name, description.id)
       case URLCheck(u, d) => agent.register(description.port, u, d.toSeconds, description.name, description.id)
       case MultiCheck(set) => set.foreach(c => registerCheck(c))
@@ -48,31 +50,41 @@ trait OrbitzConsulService extends IConsulService {
 
   def deregister() = agent.deregister(description.id)
 
-  def pass() = agent.deregister(description.id)
+  def pass() = agent.pass(checkId)
+}
+
+object BoundOrbitzService {
+
+  def apply(agentClient: AgentClient, name: String, id: String, port: Int, check: ConsulCheck) = {
+
+    new BoundOrbitzService(agentClient, ServiceDescription(name, id, port, check))
+  }
+
 }
 
 class BoundOrbitzService(val agent: AgentClient, val description: ServiceDescription)
   extends OrbitzConsulService {
 
   private case class PassTimerTask(service: IConsulService) extends TimerTask {
-    def run = service.pass()
+    def run =
+      print("checking in")
+      service.pass()
   }
 
   private var timer: Option[Timer] = None
 
-
   override def register() = {
+    super.register()
+    pass()
     timer match {
       case None =>
         timer = Some(new Timer())
-        description.check match { // handle multicheck
-        case TTLCheck(d) => timer.map(_.schedule(new PassTimerTask(this), d.toSeconds))
-      }
-      case _ =>timer
+        description.check match {
+          case TTLCheck(d) => timer.map(_.schedule(new PassTimerTask(this),0, d.toMillis / 2))
+        }
+      case _ => timer
 
     }
-
-    super.register()
   }
 
   override def deregister() = {
@@ -81,3 +93,5 @@ class BoundOrbitzService(val agent: AgentClient, val description: ServiceDescrip
   }
 
 }
+
+

@@ -21,7 +21,9 @@ object Dependencies {
 val dependencies = Seq(
 
   "com.typesafe.akka" % "akka-actor_2.11" % "2.3.11",
-  "com.orbitz.consul" % "consul-client" % "0.9.6"
+  "com.orbitz.consul" % "consul-client" % "0.9.6",
+  "org.apache.cxf" % "cxf-rt-rs-client" % "3.1.1",
+  "org.apache.cxf" % "cxf-rt-transports-http" % "3.1.1"
 
   )
 
