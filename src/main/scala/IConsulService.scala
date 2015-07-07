@@ -3,6 +3,7 @@ import java.nio.file.Path
 import java.util.{Timer, TimerTask}
 
 import com.orbitz.consul.AgentClient
+import com.typesafe.scalalogging.LazyLogging
 
 import scala.concurrent.duration.FiniteDuration
 
@@ -16,7 +17,7 @@ case class ScriptCheck(uri: Path, interval: FiniteDuration) extends ConsulCheck
 
 case class MultiCheck(checks: Set[ConsulCheck]) extends ConsulCheck
 
-case class ServiceDescription(name: String, id: String, port: Int, check: ConsulCheck)
+case class ServiceDescription(name: String, id: String, port: Int, check: ConsulCheck,tags:List[String])
 
 trait IConsulService {
   val description: ServiceDescription
@@ -41,7 +42,7 @@ trait OrbitzConsulService extends IConsulService {
   private def registerCheck(check: ConsulCheck): Unit = {
     check match {
 
-      case TTLCheck(d) => agent.register(description.port, d.toSeconds, description.name, description.id)
+      case TTLCheck(d) => agent.register(description.port, d.toSeconds, description.name, description.id,description.tags:_*)
       case URLCheck(u, d) => agent.register(description.port, u, d.toSeconds, description.name, description.id)
       case MultiCheck(set) => set.foreach(c => registerCheck(c))
     }
@@ -55,20 +56,22 @@ trait OrbitzConsulService extends IConsulService {
 
 object BoundOrbitzService {
 
-  def apply(agentClient: AgentClient, name: String, id: String, port: Int, check: ConsulCheck) = {
+  def apply(agentClient: AgentClient, name: String, id: String, port: Int, check: ConsulCheck,tags:List[String]=Nil) = {
 
-    new BoundOrbitzService(agentClient, ServiceDescription(name, id, port, check))
+    new BoundOrbitzService(agentClient, ServiceDescription(name, id, port, check,List(name+"-"+id)++tags))
   }
 
 }
 
 class BoundOrbitzService(val agent: AgentClient, val description: ServiceDescription)
-  extends OrbitzConsulService {
+  extends OrbitzConsulService
+  with LazyLogging {
 
-  private case class PassTimerTask(service: IConsulService) extends TimerTask {
-    def run =
-      print("checking in")
-      service.pass()
+  private case class PassTimerTask() extends TimerTask {
+    def run = {
+      logger.info("checking in\n")
+      pass()
+    }
   }
 
   private var timer: Option[Timer] = None
@@ -80,7 +83,10 @@ class BoundOrbitzService(val agent: AgentClient, val description: ServiceDescrip
       case None =>
         timer = Some(new Timer())
         description.check match {
-          case TTLCheck(d) => timer.map(_.schedule(new PassTimerTask(this),0, d.toMillis / 2))
+
+          case TTLCheck(d) =>
+            val interval = d.toMillis / 4
+            timer.map(_.schedule(new PassTimerTask(),0, interval))
         }
       case _ => timer
 
